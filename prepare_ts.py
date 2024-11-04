@@ -6,10 +6,35 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from models import *
+from customAgents.agent_llm import SimpleInvokeLLM
+from customAgents.agent_prompt import BasePrompt
+from customAgents.runtime import SimpleRuntime
+from prompt import agent_prompts
+import json
 
 
-def get_agent_rate(tickerSymbol, start_date, pred_date):
-    return random.random()
+def load_config():
+    with open('config.json', 'r') as config_file:
+        config = json.load(config_file)
+    return config
+
+config = load_config()
+llm = SimpleInvokeLLM(model=config['model'], api_key=config['api_key'], temperature=0.0)
+
+def get_agent_rate(article_description, tickerSymbol, start_date, pred_date):
+    agent_types = list(agent_prompts.keys())
+    scores = {}
+
+    for agent_type in agent_types:
+        prompt = BasePrompt(text=agent_prompts[agent_type])
+        prompt.construct_prompt({"article_description": article_description, "tickerSymbol": tickerSymbol, "start_date": start_date, "pred_date": pred_date})
+        agent = SimpleRuntime(llm, prompt)
+        agent_rate = float(agent.loop())
+        scores[agent_type] = agent_rate
+        print(f"{agent_type}: {agent_rate}")
+
+    return np.mean(list(scores.values()))
+
 
 def get_data(tickerSymbol, start_date, end_date):
     data = yf.Ticker(tickerSymbol)
