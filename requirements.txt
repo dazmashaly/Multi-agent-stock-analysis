@@ -1,0 +1,3 @@
+autots
+transformers==4.40.1
+accelerate==0.28.0
