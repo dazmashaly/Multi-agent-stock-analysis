@@ -209,7 +209,7 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
             start_date = end_date - pd.Timedelta(weeks=1)
             print(f"Getting agent rate for {tickerSymbol} from {start_date} to {end_date}")
             agent_rate = get_agent_rate(tickerSymbol, start_date, pred_date)
-            pdb.set_trace()
+            #pdb.set_trace()
             rates.append(agent_rate)
             
             final_result.append({
