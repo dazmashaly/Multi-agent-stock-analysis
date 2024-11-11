@@ -4,6 +4,12 @@ from customAgents.runtime import SimpleRuntime
 from prompt import agent_prompts
 import json
 import numpy as np
+from serpapi import GoogleSearch
+import datetime
+from langchain_community.document_loaders import AsyncHtmlLoader
+from langchain_community.document_transformers import Html2TextTransformer
+import re
+import time
 
 def load_config():
     with open('config.json', 'r') as config_file:
@@ -11,44 +17,94 @@ def load_config():
     return config
 
 config = load_config()
-llm = SimpleInvokeLLM(model=config['model'], api_key=config['api_key'], temperature=0.0)
+llm = SimpleInvokeLLM(model=config['model'], api_key=config['google_api_key'], temperature=0.0)
 
-def get_agent_rate(article_description, tickerSymbol, start_date, pred_date):
+def clean_text(text):
+    # Replace multiple spaces with a single space
+    text = re.sub(r'\s+', ' ', text)
+    # Replace multiple line breaks with a single line break
+    text = re.sub(r'\n+', '\n', text)
+    # Strip leading and trailing whitespace
+    return text
+
+
+
+def google_search(query,start_date,end_date, num_results=5):
+    # change date format to MM/DD/YYYY
+    start_date = datetime.datetime.strptime(start_date, "%Y-%m-%d")
+    end_date = datetime.datetime.strptime(end_date, "%Y-%m-%d")
+    start_date = start_date.strftime("%m/%d/%Y")
+    end_date = end_date.strftime("%m/%d/%Y")
+    params = {
+        "engine": "google",
+        "q": query,
+        "api_key": config["serpapi_key"],  # Using the API key from https://serpapi.com/manage-api-key
+        "num": num_results,
+        "tbs": f"cdr:1,cd_min:{start_date},cd_max:{end_date}"
+    }
+    
+    search = GoogleSearch(params)
+    results = search.get_dict()
+    if "organic_results" in results:
+        return results["organic_results"]
+    else:
+        return []
+
+def scrape_urls(urls):
+    
+    loader = AsyncHtmlLoader(urls)
+    docs = loader.load()
+
+    html2text = Html2TextTransformer()
+    docs_transformed = html2text.transform_documents(docs)
+    docs_transformed = [clean_text(doc.page_content) for doc in docs_transformed if doc is not None]
+    return docs_transformed
+
+
+
+def get_agent_rate(tickerSymbol, start_date, pred_date):
     agent_types = list(agent_prompts.keys())
     scores = {}
+    final_socres = []
+    query = f"{tickerSymbol} news"
+    search_results = google_search(query, start_date, pred_date)
+    links = [result["link"] for result in search_results]
+    docs = scrape_urls(links)
+    
+    for i,doc in enumerate(docs,1):
+        
+        print(f"Document {i}")
+        time.sleep(30)
+        if len(doc) < 250:
+            print("Document too short")
+            continue
+        print("Scoring...")
+        try:
+            for agent_type in agent_types:
+                time.sleep(3)
+                prompt = BasePrompt(text=agent_prompts[agent_type])
+                prompt.construct_prompt({"article_description": doc, "tickerSymbol": tickerSymbol, "start_date": start_date, "pred_date": pred_date})
+                agent = SimpleRuntime(llm, prompt)
+                agent_rate = float(agent.loop()) 
+                scores[agent_type] = agent_rate
+                print(f"{agent_type}: {agent_rate}")
+                final_socres.append(np.mean(list(scores.values())))
+            scores["final_score"] = np.mean(list(scores.values()))
+            with open(f"scraped\\{tickerSymbol}_doc_{i}_{start_date}_{pred_date}.txt", "w", encoding="utf-8") as f:
+                f.write(doc)
+                f.write("\n\n")
+                f.write(f"Scores: {scores}")
+                f.write("\n\n")
+        except Exception as e:
+            print(f"failed to score document{i}")
+            print(f"Error: {e}")
+            continue
 
-    for agent_type in agent_types:
-        prompt = BasePrompt(text=agent_prompts[agent_type])
-        prompt.construct_prompt({"article_description": article_description, "tickerSymbol": tickerSymbol, "start_date": start_date, "pred_date": pred_date})
-        agent = SimpleRuntime(llm, prompt)
-        agent_rate = float(agent.loop())
-        scores[agent_type] = agent_rate
-        print(f"{agent_type}: {agent_rate}")
 
-    return np.mean(list(scores.values()))
+    return np.mean(final_socres)
 
-article_description = """
-Breaking News: Tech Giant XYZ Corp Unveils Revolutionary AI-Powered Product
-
-XYZ Corp, a leading technology company, has just announced the launch of its groundbreaking AI-powered product, 'IntelliSense Pro.' This innovative solution combines advanced machine learning algorithms with real-time data processing to revolutionize decision-making across various industries.
-
-Key features of IntelliSense Pro include:
-1. Predictive analytics for business forecasting
-2. Natural language processing for enhanced customer interactions
-3. Computer vision capabilities for quality control in manufacturing
-4. Adaptive learning systems for personalized user experiences
-
-Industry experts predict that IntelliSense Pro could potentially disrupt multiple sectors, including finance, healthcare, and retail. The product's ability to process vast amounts of data and provide actionable insights in real-time is expected to significantly improve operational efficiency and drive innovation.
-
-XYZ Corp's CEO, Jane Smith, stated, "IntelliSense Pro represents a major leap forward in AI technology. We believe this product will empower businesses to make smarter decisions, optimize their processes, and stay ahead in an increasingly competitive global market."
-
-The company has also announced partnerships with several Fortune 500 companies for early adoption and implementation of IntelliSense Pro. These collaborations are expected to provide valuable case studies and further refine the product's capabilities.
-
-As XYZ Corp prepares for a wide-scale rollout in the coming months, industry analysts are closely watching the potential impact on the AI market and the broader implications for digital transformation across various sectors.
-
-"""
 tickerSymbol = "NVDA"
 start_date = "2020-01-01"
-pred_date = "2024-05-01"
+pred_date = "2024-01-08"
 
-print(get_agent_rate(article_description, tickerSymbol, start_date, pred_date))
+print(get_agent_rate(tickerSymbol, start_date, pred_date))

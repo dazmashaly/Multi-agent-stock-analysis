@@ -11,7 +11,14 @@ from customAgents.agent_prompt import BasePrompt
 from customAgents.runtime import SimpleRuntime
 from prompt import agent_prompts
 import json
-
+import numpy as np
+from serpapi import GoogleSearch
+import datetime
+from langchain_community.document_loaders import AsyncHtmlLoader
+from langchain_community.document_transformers import Html2TextTransformer
+import re
+import time
+import pdb
 
 def load_config():
     with open('config.json', 'r') as config_file:
@@ -19,21 +26,101 @@ def load_config():
     return config
 
 config = load_config()
-llm = SimpleInvokeLLM(model=config['model'], api_key=config['api_key'], temperature=0.0)
+llm = SimpleInvokeLLM(model=config['model'], api_key=config['google_api_key'], temperature=0.0)
 
-def get_agent_rate(article_description, tickerSymbol, start_date, pred_date):
+
+
+def clean_text(text):
+    # Replace multiple spaces with a single space
+    text = re.sub(r'\s+', ' ', text)
+    # Replace multiple line breaks with a single line break
+    text = re.sub(r'\n+', '\n', text)
+    # Strip leading and trailing whitespace
+    return text
+
+
+def google_search(query,start_date,end_date, num_results=10):
+    # change date format to MM/DD/YYYY
+    # start_date = datetime.datetime.strptime(start_date, "%Y-%m-%d")
+    # end_date = datetime.datetime.strptime(end_date, "%Y-%m-%d")
+    start_date = start_date.strftime("%m/%d/%Y")
+    end_date = end_date.strftime("%m/%d/%Y")
+    params = {
+        "engine": "google",
+        "q": query,
+        "api_key": config["serpapi_key"],  # Using the API key from https://serpapi.com/manage-api-key
+        "num": num_results,
+        "tbs": f"cdr:1,cd_min:{start_date},cd_max:{end_date}"
+    }
+    
+    search = GoogleSearch(params)
+    results = search.get_dict()
+    if "organic_results" in results:
+        return results["organic_results"]
+    else:
+        return []
+
+def scrape_urls(urls):
+    html2text = Html2TextTransformer()
+    scraped = 0
+    docs_transformed = []
+    for url in urls:
+        loader = AsyncHtmlLoader(url)
+        doc = loader.load()
+
+        doc_transformed = html2text.transform_documents(doc)
+        doc_transformed = doc_transformed[0] if doc_transformed else None
+        doc_transformed = clean_text(doc_transformed.page_content)
+        if len(doc_transformed) > 1500:
+            docs_transformed.append(doc_transformed)
+            scraped += 1
+        else:
+            print(f"Document too short: {len(doc_transformed)} characters")
+            continue
+        if scraped >= 5:
+            break
+    return docs_transformed
+
+
+def get_agent_rate(tickerSymbol, start_date, pred_date):
     agent_types = list(agent_prompts.keys())
     scores = {}
+    final_socres = []
+    query = f"{tickerSymbol} stocks news, stock market"
+    search_results = google_search(query, start_date, pred_date)
+    links = [result["link"] for result in search_results]
+    docs = scrape_urls(links)
+    if isinstance(start_date,datetime.datetime):
+        start_date = start_date.strftime("%Y-%m-%d")
+        pred_date = pred_date.strftime("%Y-%m-%d") 
+    for i,doc in enumerate(docs,1):
+        
+        print(f"Document {i}")
+        time.sleep(30)
+        print("Scoring...")
+        try:
+            for agent_type in agent_types:
+                time.sleep(3)
+                prompt = BasePrompt(text=agent_prompts[agent_type])
+                prompt.construct_prompt({"article_description": doc, "tickerSymbol": tickerSymbol, "start_date": start_date, "pred_date": pred_date})
+                agent = SimpleRuntime(llm, prompt)
+                agent_rate = float(agent.loop()) 
+                scores[agent_type] = agent_rate
+                print(f"{agent_type}: {agent_rate}")
+                final_socres.append(agent_rate)
+            scores["final_score"] = np.mean(final_socres)
+            with open(f"scraped\\{tickerSymbol}_doc_{i}_{start_date}_{pred_date}.txt", "w", encoding="utf-8") as f:
+                f.write(doc)
+                f.write("\n\n")
+                f.write(f"Scores: {scores}")
+                f.write("\n\n")
+        except Exception as e:
+            print(f"failed to score document {i}")
+            print(f"Error: {e}")
+            continue
 
-    for agent_type in agent_types:
-        prompt = BasePrompt(text=agent_prompts[agent_type])
-        prompt.construct_prompt({"article_description": article_description, "tickerSymbol": tickerSymbol, "start_date": start_date, "pred_date": pred_date})
-        agent = SimpleRuntime(llm, prompt)
-        agent_rate = float(agent.loop())
-        scores[agent_type] = agent_rate
-        print(f"{agent_type}: {agent_rate}")
 
-    return np.mean(list(scores.values()))
+    return np.mean(final_socres)
 
 
 def get_data(tickerSymbol, start_date, end_date):
@@ -46,6 +133,7 @@ def get_data(tickerSymbol, start_date, end_date):
     df["date"] = pd.to_datetime(data.index)
     df["series_id"] = tickerSymbol
     df["date"] = df["date"].dt.tz_localize(None)
+    df = df.dropna()
     return df
 
 
@@ -55,7 +143,6 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
     tsa_preds = []
     rates = []
     final_result = []
-    
     data = get_data(tickerSymbol,start_date,end_date)
     value_column = "price" if price else "returns"
 
@@ -99,18 +186,18 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
                     normed_seqs = seq
                     mean = 0
                     std = 1
-                model = get_Time_MOE_model()
+                MOE = get_Time_MOE_model()
                 prediction_length = 2
-                output = model.generate(normed_seqs, max_new_tokens=prediction_length) 
+                output = MOE.generate(normed_seqs, max_new_tokens=prediction_length) 
                 normed_predictions = output[:, -prediction_length:] 
 
                 # inverse normalize
                 predictions = normed_predictions * std + mean
                 pred = predictions[0][0].numpy() + 0
-                pred_date = data.iloc[idx]['date']                
+                pred_date = data.iloc[idx]['date']  #timestamp              
 
             else:
-                raise Exception("Invalid Model plase use SARIMA, AutoTS or TIME-MOE")
+                raise Exception(f"Invalid Model {model} plase use SARIMA, AutoTS or TIME-MOE")
 
                 
             
@@ -120,8 +207,9 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
             pred_date = pd.to_datetime(pred_date)
             end_date = pred_date - pd.Timedelta(weeks=1)
             start_date = end_date - pd.Timedelta(weeks=1)
-            
+            print(f"Getting agent rate for {tickerSymbol} from {start_date} to {end_date}")
             agent_rate = get_agent_rate(tickerSymbol, start_date, pred_date)
+            pdb.set_trace()
             rates.append(agent_rate)
             
             final_result.append({
@@ -133,7 +221,7 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
             })
             
         except Exception as e:
-            print(f"Error at date {data[idx]}:")
+            print(f"Error at date {data.iloc[idx]['date']}:")
             print(f"Error message: {str(e)}")
             print("Skipping this iteration...")
             continue
@@ -160,11 +248,11 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
 
 if __name__ == "__main__":
 
-    tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA", "PYPL", "INTC", "CSCO"]
+    tickers = ["AAPL", ]
     final_data = pd.DataFrame()
     model = "TIME-MOE"
     for ticker in tickers:
-        final_result = prepare_data(ticker,"2023-01-01","2024-10-01",model,False,False)
+        final_result = prepare_data(ticker,"2023-01-01","2024-10-01",model,True,False)
         new_data = pd.DataFrame(final_result[-1])
         new_data["model"] = model
         new_data["ticker"] = ticker
