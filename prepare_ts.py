@@ -208,11 +208,8 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
             end_date = pred_date - pd.Timedelta(weeks=1)
             start_date = end_date - pd.Timedelta(weeks=1)
             print(f"Getting agent rate for {tickerSymbol} from {start_date} to {end_date}")
-            agent_rate = 1 #get_agent_rate(tickerSymbol, start_date, pred_date)
+            agent_rate = get_agent_rate(tickerSymbol, start_date, pred_date)
             rates.append(agent_rate)
-            if idx-1 == 89:
-                pdb.set_trace()
-            print(idx-1)
             final_result.append({
                 "tsa": pred,
                 "agent": agent_rate,
