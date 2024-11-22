@@ -152,7 +152,7 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
                 
                 curr_data = data[[value_column,"date"]]
                 curr_data.set_index("date",inplace=True)
-                curr_data = curr_data[value_column][:idx]
+                curr_data = curr_data[value_column][:idx-1]
                 order,seasonal_order = get_best_params_for_SARIMA(curr_data)
                 results = fit_sarimax_model(curr_data, order,seasonal_order)
                 pred = results.forecast()
@@ -164,7 +164,7 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
 
 
             elif model == "AutoTS":
-                curr_data = data[:idx]
+                curr_data = data[:idx-1]
                 model = get_AUTO_TS_model(curr_data, value_column)
 
                 prediction = model.predict()
@@ -176,7 +176,7 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
 
 
             elif model == "TIME-MOE":
-                curr_data = data[:idx]
+                curr_data = data[:idx-1]
                 curr_data.dropna(inplace=True)
                 seq = torch.tensor(curr_data[[value_column]].astype(np.float32).to_numpy())
                 seq = seq.transpose(1,0)
@@ -194,7 +194,7 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
                 # inverse normalize
                 predictions = normed_predictions * std + mean
                 pred = predictions[0][0].numpy() + 0
-                pred_date = data.iloc[idx]['date']  #timestamp              
+                pred_date = data.iloc[idx-1]['date']  #timestamp              
 
             else:
                 raise Exception(f"Invalid Model {model} plase use SARIMA, AutoTS or TIME-MOE")
@@ -208,20 +208,21 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
             end_date = pred_date - pd.Timedelta(weeks=1)
             start_date = end_date - pd.Timedelta(weeks=1)
             print(f"Getting agent rate for {tickerSymbol} from {start_date} to {end_date}")
-            agent_rate = get_agent_rate(tickerSymbol, start_date, pred_date)
-            pdb.set_trace()
+            agent_rate = 1 #get_agent_rate(tickerSymbol, start_date, pred_date)
             rates.append(agent_rate)
-            
+            if idx-1 == 89:
+                pdb.set_trace()
+            print(idx-1)
             final_result.append({
                 "tsa": pred,
                 "agent": agent_rate,
                 "date": pred_date.strftime('%Y-%m-%d'),
-                "label": data.iloc[idx][value_column],
-                "error": pred - data.iloc[idx][value_column]
+                "label": data.iloc[idx-1][value_column],
+                "error": pred - data.iloc[idx-1][value_column]
             })
             
         except Exception as e:
-            print(f"Error at date {data.iloc[idx]['date']}:")
+            print(f"Error at date {data.iloc[idx-1]['date']}:")
             print(f"Error message: {str(e)}")
             print("Skipping this iteration...")
             continue
@@ -248,7 +249,7 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
 
 if __name__ == "__main__":
 
-    tickers = ["AAPL", ]
+    tickers = ["AAPL", "NFLX",] #"AMZN", "GOOGL", "MSFT", "TSLA", "FB", "NVDA", "PYPL", "ADBE"]
     final_data = pd.DataFrame()
     model = "TIME-MOE"
     for ticker in tickers:
