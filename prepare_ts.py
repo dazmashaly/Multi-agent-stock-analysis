@@ -66,19 +66,24 @@ def scrape_urls(urls):
     docs_transformed = []
     for url in urls:
         loader = AsyncHtmlLoader(url)
-        doc = loader.load()
+        try:
+            doc = loader.load()
 
-        doc_transformed = html2text.transform_documents(doc)
-        doc_transformed = doc_transformed[0] if doc_transformed else None
-        doc_transformed = clean_text(doc_transformed.page_content)
-        if len(doc_transformed) > 1500:
-            docs_transformed.append(doc_transformed)
-            scraped += 1
-        else:
-            print(f"Document too short: {len(doc_transformed)} characters")
+            doc_transformed = html2text.transform_documents(doc)
+            doc_transformed = doc_transformed[0] if doc_transformed else None
+            doc_transformed = clean_text(doc_transformed.page_content)
+            if len(doc_transformed) > 1500:
+                docs_transformed.append(doc_transformed)
+                scraped += 1
+            else:
+                print(f"Document too short: {len(doc_transformed)} characters")
+                continue
+            if scraped >= 5:
+                break
+        except Exception as e:
+            print(f"Failed to scrape url: {url}")
+            print(f"Error: {e}")
             continue
-        if scraped >= 5:
-            break
     return docs_transformed
 
 
