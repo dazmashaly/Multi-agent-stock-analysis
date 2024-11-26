@@ -1,5 +1,5 @@
 {
-    "api_key": "",
+    "google_api_key": "AIzaSyAdEIB1RhPccw_6quS0MjTRRRRGsQOHTPc",
     "model": "gemini-1.5-flash",
-    "serpapi_key": ""
+    "serpapi_key": "bfdbd29760791ddc1b318174462af601243123aa393ead204f3c703d840f5ddc"
 }

@@ -19,6 +19,8 @@ from langchain_community.document_transformers import Html2TextTransformer
 import re
 import time
 import pdb
+import os
+
 
 def load_config():
     with open('config.json', 'r') as config_file:
@@ -114,7 +116,19 @@ def get_agent_rate(tickerSymbol, start_date, pred_date):
                 print(f"{agent_type}: {agent_rate}")
                 final_socres.append(agent_rate)
             scores["final_score"] = np.mean(final_socres)
-            with open(f"scraped\\{tickerSymbol}_doc_{i}_{start_date}_{pred_date}.txt", "w", encoding="utf-8") as f:
+
+            # Define the directory for storing scraped data
+            scraped_dir = "scraped"
+
+            # Ensure the directory exists
+            if not os.path.exists(scraped_dir):
+                os.makedirs(scraped_dir)
+
+            # Assuming `tickerSymbol`, `i`, `start_date`, `pred_date`, `doc`, and `scores` are already defined
+            file_name = f"{tickerSymbol}_doc_{i}_{start_date}_{pred_date}.txt"
+            file_path = os.path.join(scraped_dir, file_name)
+
+            with open(file_path, "w", encoding="utf-8") as f:
                 f.write(doc)
                 f.write("\n\n")
                 f.write(f"Scores: {scores}")
@@ -251,7 +265,7 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
 
 if __name__ == "__main__":
 
-    tickers = ["AAPL", "NFLX",] #"AMZN", "GOOGL", "MSFT", "TSLA", "FB", "NVDA", "PYPL", "ADBE"]
+    tickers = ["TSLA", "FB"]
     final_data = pd.DataFrame()
     model = "TIME-MOE"
     for ticker in tickers:
