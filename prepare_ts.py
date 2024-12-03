@@ -19,6 +19,16 @@ from langchain_community.document_transformers import Html2TextTransformer
 import re
 import time
 import pdb
+import os
+import logging
+import warnings
+def clear_terminal():
+    # For Windows
+    if os.name == 'nt':
+        os.system('cls')
+    # For Linux and macOS
+    else:
+        os.system('clear')
 
 def load_config():
     with open('config.json', 'r') as config_file:
@@ -66,19 +76,24 @@ def scrape_urls(urls):
     docs_transformed = []
     for url in urls:
         loader = AsyncHtmlLoader(url)
-        doc = loader.load()
+        try:
+            doc = loader.load()
 
-        doc_transformed = html2text.transform_documents(doc)
-        doc_transformed = doc_transformed[0] if doc_transformed else None
-        doc_transformed = clean_text(doc_transformed.page_content)
-        if len(doc_transformed) > 1500:
-            docs_transformed.append(doc_transformed)
-            scraped += 1
-        else:
-            print(f"Document too short: {len(doc_transformed)} characters")
+            doc_transformed = html2text.transform_documents(doc)
+            doc_transformed = doc_transformed[0] if doc_transformed else None
+            doc_transformed = clean_text(doc_transformed.page_content)
+            if len(doc_transformed) > 1500:
+                docs_transformed.append(doc_transformed)
+                scraped += 1
+            else:
+                print(f"Document too short: {len(doc_transformed)} characters")
+                continue
+            if scraped >= 5:
+                break
+        except Exception as e:
+            print(f"Failed to scrape url: {url}")
+            print(f"Error: {e}")
             continue
-        if scraped >= 5:
-            break
     return docs_transformed
 
 
@@ -109,7 +124,18 @@ def get_agent_rate(tickerSymbol, start_date, pred_date):
                 print(f"{agent_type}: {agent_rate}")
                 final_socres.append(agent_rate)
             scores["final_score"] = np.mean(final_socres)
-            with open(f"scraped\\{tickerSymbol}_doc_{i}_{start_date}_{pred_date}.txt", "w", encoding="utf-8") as f:
+
+            # Define the directory for storing scraped data
+            scraped_dir = "scraped"
+
+            # Ensure the directory exists
+            if not os.path.exists(scraped_dir):
+                os.makedirs(scraped_dir)
+            # Assuming `tickerSymbol`, `i`, `start_date`, `pred_date`, `doc`, and `scores` are already defined
+            file_name = f"{tickerSymbol}_doc_{i}_{start_date}_{pred_date}.txt"
+            file_path = os.path.join(scraped_dir, file_name)
+
+            with open(file_path, "w", encoding="utf-8") as f:
                 f.write(doc)
                 f.write("\n\n")
                 f.write(f"Scores: {scores}")
@@ -145,7 +171,8 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
     final_result = []
     data = get_data(tickerSymbol,start_date,end_date)
     value_column = "price" if price else "returns"
-
+    av = os.listdir("scraped")
+    av = [(i.split("_")[0],i.split("_")[3]) for i in av]
     for idx, r in tqdm(data.iloc[25:].iterrows(), total=len(data.iloc[25:])):
         try:
             if model == "SARIMA":
@@ -153,7 +180,7 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
                 curr_data = data[[value_column,"date"]]
                 curr_data.set_index("date",inplace=True)
                 curr_data = curr_data[value_column][:idx-1]
-                order,seasonal_order = get_best_params_for_SARIMA(curr_data)
+                order,seasonal_order = get_best_params_for_SARIMA(curr_data,3)
                 results = fit_sarimax_model(curr_data, order,seasonal_order)
                 pred = results.forecast()
                 pred_date = f"{pred.index[0].year}-{pred.index[0].month}-{pred.index[0].day}"
@@ -165,10 +192,10 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
 
             elif model == "AutoTS":
                 curr_data = data[:idx-1]
-                model = get_AUTO_TS_model(curr_data, value_column)
+                AutoTS = get_AUTO_TS_model(curr_data, value_column)
 
-                prediction = model.predict()
-
+                prediction = AutoTS.predict()
+                clear_terminal()
                 # Get forecast
                 pred = prediction.forecast.values[1][0]
                 pred_date = f"{prediction.forecast.index[1].year}-{prediction.forecast.index[1].month}-{prediction.forecast.index[1].day}"
@@ -199,20 +226,22 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
             else:
                 raise Exception(f"Invalid Model {model} plase use SARIMA, AutoTS or TIME-MOE")
 
-                
             
-            tsa_preds.append(pred)
+            
             
             # Get Agent rate
             pred_date = pd.to_datetime(pred_date)
             end_date = pred_date - pd.Timedelta(weeks=1)
             start_date = end_date - pd.Timedelta(weeks=1)
+            # continue if date is before date
+            if (tickerSymbol, start_date.strftime("%Y-%m-%d")) in av:
+                continue
             print(f"Getting agent rate for {tickerSymbol} from {start_date} to {end_date}")
-            agent_rate = 1 #get_agent_rate(tickerSymbol, start_date, pred_date)
+            
+            tsa_preds.append(pred)
+            agent_rate =  get_agent_rate(tickerSymbol, start_date, pred_date)
+            
             rates.append(agent_rate)
-            if idx-1 == 89:
-                pdb.set_trace()
-            print(idx-1)
             final_result.append({
                 "tsa": pred,
                 "agent": agent_rate,
@@ -248,15 +277,24 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
     return tsa_preds, rates, final_result
 
 if __name__ == "__main__":
-
-    tickers = ["AAPL", "NFLX",] #"AMZN", "GOOGL", "MSFT", "TSLA", "FB", "NVDA", "PYPL", "ADBE"]
-    final_data = pd.DataFrame()
-    model = "TIME-MOE"
-    for ticker in tickers:
-        final_result = prepare_data(ticker,"2023-01-01","2024-10-01",model,True,False)
-        new_data = pd.DataFrame(final_result[-1])
-        new_data["model"] = model
-        new_data["ticker"] = ticker
-        new_data.to_csv(f"{ticker}_{model}.csv",index=False)
-        final_data = pd.concat([final_data,new_data])
-        final_data.to_csv("final_data.csv",index=False)
+    warnings.filterwarnings('ignore')
+    logging.basicConfig(level=logging.ERROR)
+    # crete csv directory
+    os.makedirs("csvs",exist_ok=True)
+    # ["AAPL", "NFLX","ADBE","AMZN","GOOGL", "MSFT", "TSLA", "META", "NVDA", "PYPL"]
+    tickers = ["AAPL", "NFLX","ADBE","AMZN","GOOGL", "MSFT", "TSLA", "META", "NVDA", "PYPL"]
+    if os.path.exists("final_data.csv"):
+        final_data = pd.read_csv("final_data.csv")
+    else:
+        final_data = pd.DataFrame()
+    models = ["TIME-MOE","AutoTS","SARIMA"]
+    for model in models:
+        for ticker in tickers:
+            final_result = prepare_data(ticker,"2023-01-01","2024-10-01",model,True,False)
+            new_data = pd.DataFrame(final_result[-1])
+            new_data["model"] = model
+            new_data["ticker"] = ticker
+            csv_path = os.path.join("csvs",f"{ticker}_{model}.csv")
+            new_data.to_csv(csv_path,index=False)
+            final_data = pd.concat([final_data,new_data])
+            final_data.to_csv(f"final_data_{model}.csv",index=False)
