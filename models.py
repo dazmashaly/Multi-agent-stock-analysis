@@ -43,10 +43,10 @@ def fit_sarimax_model(curr_data, order, seasonal_order):
             return results
     
 def get_best_params_for_SARIMA(y, n_samples=30):
-    d = range(1, 5)
+    d = range(1, 3)
     p = range(0, 3)
-    q = range(1, 5)
-    P = D = Q = range(1, 5)
+    q = range(1, 3)
+    P = D = Q = range(1, 3)
     
     # Generate all possible parameter combinations
     pdq = list(itertools.product(p, d, q))
