@@ -1,7 +1,6 @@
 
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 from autots import AutoTS
-import torch
 from transformers import AutoModelForCausalLM
 import random
 import warnings
