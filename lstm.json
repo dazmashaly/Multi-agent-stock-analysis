@@ -1,0 +1,10 @@
+{
+    "hidden_dim": 128,
+    "num_heads": 4,
+    "num_blocks": 2,
+    "attn_drop": 0.1,
+    "qkv_bias":true,
+   "dropout":0.1,
+    "act":"ReLU",
+    "in_dims":1
+}

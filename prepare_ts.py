@@ -18,10 +18,13 @@ from langchain_community.document_loaders import AsyncHtmlLoader
 from langchain_community.document_transformers import Html2TextTransformer
 import re
 import time
-import pdb
+import torch
+from lstm import LSTMModelHandler
 import os
 import logging
 import warnings
+
+
 def clear_terminal():
     # For Windows
     if os.name == 'nt':
@@ -170,7 +173,10 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
     rates = []
     final_result = []
     data = get_data(tickerSymbol,start_date,end_date)
+    print(f"Found: {len(data)} Samples in the data")
     value_column = "price" if price else "returns"
+    if not os.path.exists("scraped"):
+        os.makedirs("scraped")
     av = os.listdir("scraped")
     av = [(i.split("_")[0],i.split("_")[3]) for i in av]
     for idx, r in tqdm(data.iloc[25:].iterrows(), total=len(data.iloc[25:])):
@@ -221,13 +227,18 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
                 # inverse normalize
                 predictions = normed_predictions * std + mean
                 pred = predictions[0][0].numpy() + 0
-                pred_date = data.iloc[idx-1]['date']  #timestamp              
+                pred_date = data.iloc[idx-1]['date']  #timestamp           
+
+            elif model == "LSTM":
+                curr_data = data[:idx-1]
+                curr_data.dropna(inplace=True)
+                curr_data = curr_data[["date",value_column]]
+                LSTM = LSTMModelHandler("lstm.json")
+                pred = LSTM.fit_predict(curr_data, num_epochs=10, batch_size=16, logging=False, input_seq_len=10) 
+                pred_date = data.iloc[idx-1]['date']
 
             else:
-                raise Exception(f"Invalid Model {model} plase use SARIMA, AutoTS or TIME-MOE")
-
-            
-            
+                raise Exception(f"Invalid Model {model} plase use SARIMA, AutoTS, LSTM or TIME-MOE")
             
             # Get Agent rate
             pred_date = pd.to_datetime(pred_date)
@@ -237,13 +248,9 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
             if (tickerSymbol, start_date.strftime("%Y-%m-%d")) in av:
                 continue
             print(f"Getting agent rate for {tickerSymbol} from {start_date} to {end_date}")
-<<<<<<< HEAD
             agent_rate = get_agent_rate(tickerSymbol, start_date, pred_date)
             #pdb.set_trace()
-            rates.append(agent_rate)
-=======
->>>>>>> 7aef8ca1de3cf33edbe6eb82f754f2b23c701643
-            
+            rates.append(agent_rate)            
             tsa_preds.append(pred)
             agent_rate =  get_agent_rate(tickerSymbol, start_date, pred_date)
             
@@ -257,8 +264,8 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
             })
             
         except Exception as e:
-            print(f"Error at date {data.iloc[idx-1]['date']}:")
             print(f"Error message: {str(e)}")
+            print(f"Error at date {data.iloc[idx-1]['date']}:")
             print("Skipping this iteration...")
             continue
     
@@ -283,11 +290,10 @@ def prepare_data(tickerSymbol, start_date,end_date,model ,price=False, plot=Fals
     return tsa_preds, rates, final_result
 
 if __name__ == "__main__":
-<<<<<<< HEAD
 
     tickers = ["AAPL", ]
     final_data = pd.DataFrame()
-    model = "TIME-MOE"
+    model = "LSTM"
     for ticker in tickers:
         final_result = prepare_data(ticker,"2023-01-01","2024-10-01",model,True,False)
         new_data = pd.DataFrame(final_result[-1])
@@ -296,7 +302,6 @@ if __name__ == "__main__":
         new_data.to_csv(f"{ticker}_{model}.csv",index=False)
         final_data = pd.concat([final_data,new_data])
         final_data.to_csv("final_data.csv",index=False)
-=======
     warnings.filterwarnings('ignore')
     logging.basicConfig(level=logging.ERROR)
     # crete csv directory
@@ -318,4 +323,3 @@ if __name__ == "__main__":
             new_data.to_csv(csv_path,index=False)
             final_data = pd.concat([final_data,new_data])
             final_data.to_csv(f"final_data_{model}.csv",index=False)
->>>>>>> 7aef8ca1de3cf33edbe6eb82f754f2b23c701643
